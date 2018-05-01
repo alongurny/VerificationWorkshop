@@ -1,0 +1,27 @@
+#lang ivy1.7
+
+type site
+type timestamp
+
+
+relation bef(T1:timestamp, T2:timestamp)
+
+action request(ts:timestamp, sender:site, receiver:site) = {
+    
+}
+
+action grant(S:site, R:site) = {
+    
+}
+
+action yield(S:site, R:site) = {
+    
+}
+
+action 
+
+
+invariant forall T1:timestamp. ~bef(T1, T1)
+invariant forall T1:timestamp, T2:timestamp. bef(T1, T2) & bef(T2, T1) -> T1 = T2
+invariant forall T1:timestamp, T2:timestamp, T3:timestamp. bef(T1, T2) & bef(T2, T3) -> bef(T1, T3)
+invariant forall T1:timestamp, T2:timestamp. bef(T1, T2) | bef(T2, T1)

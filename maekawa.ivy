@@ -3,25 +3,114 @@
 type site
 type timestamp
 
+relation (T1:timestamp < T2:timestamp)
+relation quorum(S:site, R:site)
+relation request(T:timestamp, S:site, R:site)
+relation grant(S:site, R:site)
+relation inquire(S:site, R:site)
+relation failed(S:site, R:site)
+relation yield(S:site, R:site)
+relation release(S:site, R:site)
+relation critical(S:site)
 
-relation bef(T1:timestamp, T2:timestamp)
+individual now : timestamp
 
-action request(ts:timestamp, sender:site, receiver:site) = {
-    
+after init {
+    request(T, S, R) := false;
+    grant(S, R) := false;
+    inquire(S, R) := false;
+    yield(S, R) := false;
+    failed(S, R) := false;
+    release(S, R) := false;
+    critical(S) := false;
 }
 
-action grant(S:site, R:site) = {
-    
+action changetime = {
+    local n:timestamp {
+	n := *;
+	assume now < n;
+	now := n;
+    }
+}    
+
+action handle_request(ts:timestamp, sender:site, receiver:site) = {
+    require request(ts, sender, receiver);
+    call changetime;
+    if exists K:site. grant(receiver, K) {
+	if T < ts {
+	    failed(receiver, sender) := true;
+	} else {
+	    inquire(receiver, sender) := true;
+	};
+    } else {
+	grant(receiver, sender) := true;
+    };
+    request(ts, sender, receiver) := false;
 }
 
-action yield(S:site, R:site) = {
-    
+action handle_inquire(sender:site, receiver:site) = {
+    require inquire(sender, receiver);
+    call changetime;
+    if exists Other:site. ~(sender = Other) & failed(Other, receiver) {
+	yield(receiver, sender) := true;
+	failed(Other, receiver) := false;
+    }
+    # there is another condition, not sure how to implement it
+    else if false {
+	yield(receiver, sender) := true;
+    };
+    inquire(sender, receiver) := false;
 }
 
-action 
+action handle_yield(sender:site, receiver:site) = {
+    require yield(sender, receiver);
+    call changetime;
+    
+
+    yield(sender, receiver) := false;
+}
+
+action handle_release(sender:site, receiver:site) = {
+    require release(sender, receiver);
+    call changetime;
+    request(T, site, receiver) := false;
+    release(sender, receiver) := false;
+}
+
+action handle_failed(sender:site, receiver:site) = {
+    require failed(sender, receiver);
+    call changetime;
+
+    failed(sender, receiver) := false;
+}
+
+action enter_critical_section(s:site) = {
+    require forall T:timestamp, R:site. ~grant(T, s, R) -> s = R;
+    critical(s) := true;
+}
+
+action exit_critical_section(s:site) = {
+    require critical(s);
+    critical(s) := false;
+    release(s, X) := ~(s = X);
+}
+
+export handle_request
+export handle_inquire
+export handle_yield
+export handle_release
+export handle_failed
+export enter_critical_section
+export exit_critical_section
 
 
-invariant forall T1:timestamp. ~bef(T1, T1)
-invariant forall T1:timestamp, T2:timestamp. bef(T1, T2) & bef(T2, T1) -> T1 = T2
-invariant forall T1:timestamp, T2:timestamp, T3:timestamp. bef(T1, T2) & bef(T2, T3) -> bef(T1, T3)
-invariant forall T1:timestamp, T2:timestamp. bef(T1, T2) | bef(T2, T1)
+axiom forall T1:timestamp. ~(T1 < T1)
+axiom forall T1:timestamp, T2:timestamp. T1 < T2 & T2 < T1 -> T1 = T2
+axiom forall T1:timestamp, T2:timestamp, T3:timestamp. T1 < T2 & T2 < T3 -> T1 < T3
+axiom forall T1:timestamp, T2:timestamp. T1 < T2 | T2 < T1 | T1 = T2
+
+
+axiom forall S:site. ~quorum(S,S)
+axiom forall S:site, R:site. ~quorum(S, R) -> S = R
+# axiom forall S1:site, S2:site. exists R:site. quorum(S1, R) & quorum(S2, R)
+# axiom forall R:site. exists S:site. quorum(S, R)
