@@ -22,6 +22,7 @@ relation quorum(S:site, R:site)
 relation queue(T:time, S:site, R:site)
 relation request(T:time, S:site, R:site)
 relation grant(T:time, S:site, R:site)
+relation grant_(S:site, R:site)
 relation inquire(S:site, R:site)
 relation failed(S:site, R:site)
 relation yield(S:site, R:site)
@@ -29,6 +30,12 @@ relation release(S:site, R:site)
 relation critical(S:site)
 
 individual now : time
+
+individual s1 : site
+individual s2 : site
+individual s3 : site
+
+axiom s1 ~= s2 & s1 ~= s3 & s2 ~= s3
 
 action changetime = {
     local n : time {
@@ -41,6 +48,7 @@ action changetime = {
 after init {
     request(T, S, R) := false;
     grant(T, S, R) := false;
+    grant_(S, R) := false;
     inquire(S, R) := false;
     yield(S, R) := false;
     failed(S, R) := false;
@@ -58,11 +66,12 @@ action handle_request(ts:time, sender:site, receiver:site) = {
 	} else {
 	    inquire(receiver, sender) := true;
 	};
-	if ~exists T1:time. queue(T1, sender, receiver) { #not sure what the algorithm di
-	    queue(ts,sender,receiver) := true;
+	if ~exists T1:time. queue(T1, sender, receiver) { # not sure what the algorithm di
+	    queue(ts, sender, receiver) := true;
 	};
     } else {
 	grant(ts, receiver, sender) := true;
+	grant_(receiver, sender) := true;
     };
     request(ts, sender, receiver) := false;
 }
@@ -70,27 +79,43 @@ action handle_request(ts:time, sender:site, receiver:site) = {
 action handle_inquire(sender:site, receiver:site) = {
     require inquire(sender, receiver);
     call changetime;
-    if exists Other:site. ~(sender = Other) & failed(Other, receiver) {
-	yield(receiver, sender) := true;
-	failed(Other, receiver) := false;
-    } else if exists Other:site. ~(sender = Other) & yield(receiver, Other) & forall T:time. ~grant(T, Other, receiver) {
-	yield(receiver, sender) := true;
-    };
     inquire(sender, receiver) := false;
+    if exists Other:site. sender ~= Other & failed(Other, receiver) {
+	local other:site {
+	    assume sender ~= other & failed(other, receiver);
+	    yield(receiver, sender) := true;
+	    failed(other, receiver) := false;
+	};
+    } else if exists Other:site. sender ~= Other & yield(receiver, Other) {
+	if ~grant_(Other, receiver) {
+	    yield(receiver, sender) := true;
+	};
+    };
 }
 
 action handle_yield(sender:site, receiver:site) = {
     require yield(sender, receiver);
     call changetime;
-    if exists T:time, S:site. queue(T, S, receiver) & forall T0:time, S0:site. queue(T0, S0, receiver) -> T <= T0 {
-	queue(T, S, receiver) := false;
-	grant(T, receiver, S) := true;
+    if exists T:time, S:site. queue(T, S, receiver) { # if the queue is not empty
+	local max_t:time, max_s:site { # find the maximum
+	    max_t := *;
+	    max_s := *;
+	    assume forall T0:time, S0:site. queue(T0, S0, receiver) -> T <= T0;
+	    queue(T, S, receiver) := false; # push the maximum out of the queue
+	    grant(T, receiver, S) := true; # give the maximum a grant
+	    grant_(receiver, S) := true;
+	};
     };
-    if exists T:time. grant(T, sender, receiver) {
-	grant(T, sender, receiver) := false;
-	queue(T, sender, receiver) := true;
+    if grant_(sender, receiver) { # find the grant that was given and cancel and queue it
+	local t:time {
+	    t := *;
+	    assume grant(t, sender, receiver);
+	    grant(t, sender, receiver) := false;
+	    grant_(sender, receiver) := false;
+	    queue(T, sender, receiver) := true;
+	};
     } else {
-	assert false;
+#	assert false; ask oded
     };
     yield(sender, receiver) := false;
 }
@@ -98,17 +123,22 @@ action handle_yield(sender:site, receiver:site) = {
 action handle_release(sender:site, receiver:site) = {
     require release(sender, receiver);
     call changetime;
+    release(sender, receiver) := false;
     queue(T:time, sender, receiver) := false;
     if exists T:time, S:site. queue(T, S, receiver) {
-	if forall T0:time, S0:site. queue(T0, S0, receiver) -> T < T0 | T = T0 {
-	    grant(T, receiver, S) := true;
+	local t:time, s:site {
+	    t := *;
+	    s := *;
+	    assume queue(t, s, receiver);
+	    assume queue(T0, S0, receiver) -> t <= T0; # t has top priority
+	    grant(t, receiver, s) := true;
+	    grant_(receiver, s) := true;
 	};
     };
-    release(sender, receiver) := false;
 }
 
 action enter_critical_section(s:site) = {
-    require forall T:time, R:site. ~grant(T, s, R) -> s = R;
+    require forall R:site. s ~= R -> grant_(R, s);
     critical(s) := true;
 }
 
@@ -125,4 +155,12 @@ export handle_release
 export enter_critical_section
 export exit_critical_section
 
-invariant true
+invariant grant(T1, S, R1) & grant(T2, S, R2) -> T1 = T2 & R1 = R2  # every site can give only one grant
+invariant grant_(S, R1) & grant_(S, R2) -> R1 = R2
+invariant yield(K, J) -> inquire(J, K) # if someone sent a yield msg he must have recieved an inquire msg
+invariant inquire(J, K) -> grant_(J, K) # if someone sent an inquire msg he must have sent a grant before
+invariant critical(S1) & critical(S2) -> S1 = S2 # only one site in the critical section
+invariant ~grant(T, S, S)
+invariant ~grant_(S, S)
+invariant grant(T, S, R) -> grant_(S, R)
+invariant critical(S) & R ~= S -> grant_(R, S)
