@@ -1,49 +1,68 @@
 #lang ivy1.7
 
 type site
-type timestamp
+type time
 
-relation (T1:timestamp < T2:timestamp)
+module total_order(t) = {
+    relation (X:t < Y:t)
+    relation (X:t <= Y:t)
+    individual zero : t
+    axiom [antireflexivity] ~(X:t < X)
+    axiom [antisymmetry] ~(X:t < Y & Y < X)
+    axiom [transitivity] X:t < Y & Y < Z -> X < Z
+    axiom [totallity] X:t < Y | Y < X | X = Y
+    axiom [related] X:t <= Y <-> X < Y | X = Y
+    axiom [nonnegativity] zero <= X:t
+}
+
+instantiate total_order(time)
+# instantiate total_order(site)
+
 relation quorum(S:site, R:site)
-relation request(T:timestamp, S:site, R:site)
-relation grant(S:site, R:site)
+relation queue(T:time, S:site, R:site)
+relation request(T:time, S:site, R:site)
+relation grant(T:time, S:site, R:site)
 relation inquire(S:site, R:site)
 relation failed(S:site, R:site)
 relation yield(S:site, R:site)
 relation release(S:site, R:site)
 relation critical(S:site)
 
-individual now : timestamp
+individual now : time
+
+action changetime = {
+    local n : time {
+	n := *;
+	assume now < n;
+	now := n;
+    }
+}
 
 after init {
     request(T, S, R) := false;
-    grant(S, R) := false;
+    grant(T, S, R) := false;
     inquire(S, R) := false;
     yield(S, R) := false;
     failed(S, R) := false;
     release(S, R) := false;
     critical(S) := false;
+    now := zero;
 }
 
-action changetime = {
-    local n:timestamp {
-	n := *;
-	assume now < n;
-	now := n;
-    }
-}    
-
-action handle_request(ts:timestamp, sender:site, receiver:site) = {
+action handle_request(ts:time, sender:site, receiver:site) = {
     require request(ts, sender, receiver);
     call changetime;
-    if exists K:site. grant(receiver, K) {
+    if exists T:time, K:site. grant(T, receiver, K) {
 	if T < ts {
 	    failed(receiver, sender) := true;
 	} else {
 	    inquire(receiver, sender) := true;
 	};
+	if ~exists T1:time. queue(T1, sender, receiver) { #not sure what the algorithm di
+	    queue(ts,sender,receiver) := true;
+	};
     } else {
-	grant(receiver, sender) := true;
+	grant(ts, receiver, sender) := true;
     };
     request(ts, sender, receiver) := false;
 }
@@ -54,9 +73,7 @@ action handle_inquire(sender:site, receiver:site) = {
     if exists Other:site. ~(sender = Other) & failed(Other, receiver) {
 	yield(receiver, sender) := true;
 	failed(Other, receiver) := false;
-    }
-    # there is another condition, not sure how to implement it
-    else if false {
+    } else if exists Other:site. ~(sender = Other) & yield(receiver, Other) & forall T:time. ~grant(T, Other, receiver) {
 	yield(receiver, sender) := true;
     };
     inquire(sender, receiver) := false;
@@ -65,27 +82,33 @@ action handle_inquire(sender:site, receiver:site) = {
 action handle_yield(sender:site, receiver:site) = {
     require yield(sender, receiver);
     call changetime;
-    
-
+    if exists T:time, S:site. queue(T, S, receiver) & forall T0:time, S0:site. queue(T0, S0, receiver) -> T <= T0 {
+	queue(T, S, receiver) := false;
+	grant(T, receiver, S) := true;
+    };
+    if exists T:time. grant(T, sender, receiver) {
+	grant(T, sender, receiver) := false;
+	queue(T, sender, receiver) := true;
+    } else {
+	assert false;
+    };
     yield(sender, receiver) := false;
 }
 
 action handle_release(sender:site, receiver:site) = {
     require release(sender, receiver);
     call changetime;
-    request(T, site, receiver) := false;
+    queue(T:time, sender, receiver) := false;
+    if exists T:time, S:site. queue(T, S, receiver) {
+	if forall T0:time, S0:site. queue(T0, S0, receiver) -> T < T0 | T = T0 {
+	    grant(T, receiver, S) := true;
+	};
+    };
     release(sender, receiver) := false;
 }
 
-action handle_failed(sender:site, receiver:site) = {
-    require failed(sender, receiver);
-    call changetime;
-
-    failed(sender, receiver) := false;
-}
-
 action enter_critical_section(s:site) = {
-    require forall T:timestamp, R:site. ~grant(T, s, R) -> s = R;
+    require forall T:time, R:site. ~grant(T, s, R) -> s = R;
     critical(s) := true;
 }
 
@@ -99,18 +122,7 @@ export handle_request
 export handle_inquire
 export handle_yield
 export handle_release
-export handle_failed
 export enter_critical_section
 export exit_critical_section
 
-
-axiom forall T1:timestamp. ~(T1 < T1)
-axiom forall T1:timestamp, T2:timestamp. T1 < T2 & T2 < T1 -> T1 = T2
-axiom forall T1:timestamp, T2:timestamp, T3:timestamp. T1 < T2 & T2 < T3 -> T1 < T3
-axiom forall T1:timestamp, T2:timestamp. T1 < T2 | T2 < T1 | T1 = T2
-
-
-axiom forall S:site. ~quorum(S,S)
-axiom forall S:site, R:site. ~quorum(S, R) -> S = R
-# axiom forall S1:site, S2:site. exists R:site. quorum(S1, R) & quorum(S2, R)
-# axiom forall R:site. exists S:site. quorum(S, R)
+invariant true

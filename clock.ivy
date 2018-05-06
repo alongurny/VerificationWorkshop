@@ -1,0 +1,10 @@
+#lang ivy1.7
+
+type time
+relation (T1:time < T2:time)
+action increment(input:time) returns (output:time)
+    
+axiom [antireflexivity] forall X:time. ~(X < X)
+axiom [antisymmetry] forall X:time, Y:time. ~(X < Y & Y < X)
+axiom [transitivity] forall X:time, Y:time, Z:time. X < Y & Y < Z -> X < Z
+axiom [totallity] forall X:time, Y:time. X < Y | Y < X | X = Y

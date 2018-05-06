@@ -1,0 +1,15 @@
+#lang ivy1.7
+
+object clock = {
+    type time
+    relation (T1:time < T2:time)
+    action increment(input:time) returns (output:time)
+    
+    object spec = {
+	property [antireflexivity] forall X:time. ~(X < X)
+	property [antisymmetry] forall X:time, Y:time. ~(X < Y & Y < X)
+	property [transitivity] forall X:time, Y:time, Z:time. X < Y & Y < Z -> X < Z
+	property [totallity] forall X:time, Y:time. X < Y | Y < Z | X = Y
+	property [directivity] forall X:time, Y:time. exists Z:time. X < Z & Y < Z
+    }
+}
