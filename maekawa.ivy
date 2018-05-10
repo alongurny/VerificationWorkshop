@@ -39,12 +39,6 @@ relation critical(S:site)
 
 individual now : time
 
-individual s1 : site
-individual s2 : site
-individual s3 : site
-
-axiom s1 ~= s2 & s1 ~= s3 & s2 ~= s3
-
 action changetime = {
     local n : time {
 	assume now < n;
@@ -120,6 +114,8 @@ action exit_critical_section(s:site) = {
     critical(s) := false;
     invoke(s) := false;
     deliver_release(s, R, now) := true;
+    received_grant_at(s, R, T) := false;
+    received_failed_at(s, R, T) := false;
 }
 
 export initiate_request
@@ -142,4 +138,6 @@ invariant critical(S) -> invoke(S) # if a site holds the mutex it tried to do so
 invariant deliver_request(S, R, T1) & deliver_request(S, R, T2) -> T1 = T2 # a site can only send one request to another site
 invariant received_grant_at(S, R, T) -> sent_grant_at(R, S, T) # if S received a grant from R, then R sent a grant
 invariant ~(deliver_grant(R, S, T1) & received_grant_at(S, R, T2)) # cannot redeliver a grant
+invariant received_grant_at(S, R, T) -> invoke(S) # if a grant is sent to a site, it must have tried to hold the mutex
 invariant deliver_grant(R, S, T) -> invoke(S) # if a grant is sent to a site, it must have tried to hold the mutex
+invariant ~(received_grant_at(S, R, T1) & deliver_request(S, R, T2)) # if S has received a grant from R, it cannot send another request
