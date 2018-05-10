@@ -1,0 +1,94 @@
+    
+after init {
+    request(T, S, R) := false;
+    grant(T, S, R) := false;
+    inquire(S, R) := false;
+    yield(S, R) := false;
+    failed(S, R) := false;
+    release(S, R) := false;
+    critical(S) := false;
+    now := zero;
+}
+    
+action handle_request(ts:time, sender:site, receiver:site) = {
+    require request(ts, sender, receiver);
+    call changetime;
+    request(ts, sender, receiver) := false; # consume request message
+    if some t:time, k:site. grant(t, receiver, K) { # if 
+	if t <= ts {
+	    failed(receiver, sender) := true;
+	} else {
+	    inquire(receiver, sender) := true;
+	};
+	if ~exists T1:time. queue(T1, sender, receiver) { # add sender to queue iff not in queue already
+	    queue(ts, sender, receiver) := true;
+	};
+    } else {
+	grant(ts, receiver, sender) := true;
+    };
+}
+
+action handle_inquire(sender:site, receiver:site) = {
+    require inquire(sender, receiver);
+    call changetime;
+    inquire(sender, receiver) := false; # consume inquire message
+    if some other:site. sender ~= other & failed(other, receiver) {
+	yield(receiver, sender) := true;
+	failed(other, receiver) := false;
+    } else if some other:site. sender ~= other & yield(receiver, other) {
+	if ~grant_(other, receiver) {
+	    yield(receiver, sender) := true;
+	};
+    };
+}
+
+action handle_yield(sender:site, receiver:site) = {
+    require yield(sender, receiver);
+    yield(sender, receiver) := false; # consume yield message
+    call changetime;
+    if some t:time, s:site. queue(t, s, receiver) { # if the queue is not empty
+	assume forall T0:time, S0:site. queue(T0, S0, receiver) -> t <= T0;
+	queue(t, s, receiver) := false; # push the minimum out of the queue
+	grant(t, receiver, s) := true; # give the minimum a grant
+    };
+    if some t:time. grant(t, receiver, sender) { # find the grant that was given and cancel and queue it
+	grant(t, receiver, sender) := false;
+	queue(T, sender, receiver) := true;
+    } else {
+#	assert false; ask oded
+    };
+}
+
+action handle_release(sender:site, receiver:site) = {
+    require release(sender, receiver);
+    release(sender, receiver) := false; # consume release message
+    call changetime;
+    queue(T:time, sender, receiver) := false; # 
+    if some t:time, s:site. queue(t, s, receiver) {
+	assume queue(T0, S0, receiver) -> t <= T0; # t has top priority
+	grant(t, receiver, s) := true;
+    };
+}
+
+action enter_critical_section(s:site) = {
+    require R ~= s -> grant_(R, s);
+    critical(s) := true;
+}
+
+action exit_critical_section(s:site) = {
+    require critical(s);
+    critical(s) := false;
+    release(s, X) := ~(s = X);
+    grant(T, R, s) := false; # delete ALL grants to r
+}
+
+
+invariant grant(T1, S, R1) & grant(T2, S, R2) -> T1 = T2 & R1 = R2  # every site can give only one grant
+invariant grant_(S, R1) & grant_(S, R2) -> R1 = R2
+invariant yield(K, J) -> inquire(J, K) # if someone sent a yield msg he must have recieved an inquire msg
+invariant inquire(J, K) -> grant_(J, K) # if someone sent an inquire msg he must have sent a grant before
+invariant critical(S1) & critical(S2) -> S1 = S2 # only one site in the critical section
+invariant ~grant(T, S, S)
+invariant ~grant_(S, S)
+invariant grant(T, S, R) -> grant_(S, R)
+invariant critical(S) & R ~= S -> grant_(R, S)
