@@ -3,6 +3,10 @@
 type site
 type time
 
+# ASK ODED
+# upon changing deliver from relations to derived, and adding deliver(message, site, site, time),
+# all worked despite not working before. This should not be a semantic change.
+
 module zeroed_total_order(t) = {
     relation (X:t < Y:t)
     relation (X:t <= Y:t)
@@ -71,6 +75,29 @@ after init {
     now := zero;
 }
 
+action minimizes_messages(r:site, t:time) returns (z:bool) = {
+    z := true;
+    if exists S:site, T:time. deliver_request(S, r, T) & T < t {
+	z := false;
+    };
+    if exists S:site, T:time. deliver_grant(S, r, T) & T < t {
+	z := false;
+    };
+    if exists S:site, T:time. deliver_inquire(S, r, T) & T < t {
+	z := false;
+    };
+    if exists S:site, T:time. deliver_failed(S, r, T) & T < t {
+	z := false;
+    };
+    if exists S:site, T:time. deliver_yield(S, r, T) & T < t {
+	z := false;
+    };
+    if exists S:site, T:time. deliver_release(S, r, T) & T < t {
+	z := false;
+    };
+    
+}
+
 # called asynchronously when s tries to hold the mutex
 action initiate_request(s:site) = {
     require ~invoke(s);
@@ -79,9 +106,10 @@ action initiate_request(s:site) = {
     deliver_request(s, R, now) := true;
 }
 
+
 # called asynchronously when a request message is sent from s to r
 action handle_request(s:site, r:site, t:time) = {
-    require deliver_request(s, r, t) & (deliver_request(s, r, T) -> t <= T);
+    require deliver_request(s, r, t) & minimizes_messages(r, t);
     deliver_request(s, r, t) := false;
     call changetime;
     if some t0:time, k:site. sent_grant_at(r, k, t0) {
@@ -99,7 +127,7 @@ action handle_request(s:site, r:site, t:time) = {
 
 # called asynchronously when a grant message is sent from r to s
 action handle_grant(r:site, s:site, t:time) = {
-    require deliver_grant(r, s, t) & (deliver_grant(r, s, T) -> t <= T);
+    require deliver_grant(r, s, t) & minimizes_messages(r, t);
     deliver_grant(r, s, t) := false;
     call changetime;
     received_grant(s, r) := true;
@@ -110,7 +138,7 @@ action handle_grant(r:site, s:site, t:time) = {
 
 # called asynchronously when a failed message is sent from r to s
 action handle_failed(r:site, s:site, t:time) = {
-    require deliver_failed(r, s, t) & (deliver_failed(r, s, T) -> t <= T);
+    require deliver_failed(r, s, t) & minimizes_messages(r, t);
     deliver_failed(r, s, t) := false;
     call changetime;
     received_failed(s, r) := true;
@@ -119,7 +147,7 @@ action handle_failed(r:site, s:site, t:time) = {
 
 # called asynchronously when an inquire message is sent from r to k
 action handle_inquire(r:site, k:site, t:time) = {
-    require deliver_inquire(r, k, t) & (deliver_inquire(r, k, T) -> t <= T);
+    require deliver_inquire(r, k, t) & minimizes_messages(r, t);
     deliver_inquire(r, k, t) := false;
     call changetime;
     if exists O:site. received_failed(k, O) { # if received any fail or gave any yield
@@ -130,7 +158,7 @@ action handle_inquire(r:site, k:site, t:time) = {
 
 # called asynchronously when a yield message is sent from k to r
 action handle_yield(k:site, r:site, t:time) = {
-    require deliver_yield(k, r, t) & (deliver_yield(k, r, T) -> t <= T);
+    require deliver_yield(k, r, t) & minimizes_messages(r, t);
     deliver_yield(k, r, t) := false;
     call changetime;
     if some s0:site, t0:time. received_request_at(r, s0, t0) minimizing t0 {
@@ -146,7 +174,7 @@ action handle_yield(k:site, r:site, t:time) = {
 
 # called asynchronously when a release message is sent from s to r
 action handle_release(s:site, r:site, t:time) = {
-    require deliver_release(s, r, t) & (deliver_release(s, r, T) -> t <= T);
+    require deliver_release(s, r, t) & minimizes_messages(r, t);
     deliver_release(s, r, t) := false;
     call changetime;
     sent_grant_at(r, s, T) := false;
@@ -179,9 +207,9 @@ action exit_critical_section(s:site) = {
 
 export initiate_request
 export handle_request
-#export handle_grant
-#export handle_failed
-#export handle_inquire
+export handle_grant
+export handle_failed
+export handle_inquire
 #export handle_yield
 #export handle_release
 #export enter_critical_section
@@ -201,8 +229,6 @@ invariant received_request_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 invariant sent_grant_at(R, S, T1) -> invoke(S) | deliver_release_(S, R)
 invariant sent_grant_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 invariant received_grant(S, R) -> invoke(S)
-# invariant deliver_yield(K, R, T) -> invoke(K) | deliver_release_(K, R)
-# invariant deliver_yield(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 
 invariant deliver_request(S, R, T) -> T <= now
 invariant deliver_grant(S, R, T) -> T <= now
@@ -235,7 +261,8 @@ invariant deliver_failed(R, S, T1) -> received_request(R, S) # if a failed messa
 invariant deliver_release(S, R, T1) -> sent_grant(R, S)
 invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1
 
-
+invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> deliver_release_(S, R)
+invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) & deliver_release(S, R, T3) -> T2 < T3 & T3 < T1
 invariant ~(deliver_release(S, R, T1) & received_request_at(R, S, T2))
 invariant ~(received_grant(K, R) & deliver_grant(R, S, T2)) # if K has a grant from R, R cannot send any more grants
 invariant ~(received_grant(S, R) & deliver_request(S, R, T2)) # if S has received a grant from R, it cannot send another request
