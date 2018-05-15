@@ -31,7 +31,6 @@ relation sent_grant_at(R:site, S:site, T:time)
 derived received_request(R:site, S:site) = exists T. received_request_at(R, S, T)
 derived sent_grant(R:site, S:site) = exists T. sent_grant_at(R, S, T)
 
-relation sent_inquire(R:site, K:site)
 relation sent_yield(K:site, R:site)
 
 relation received_grant(S:site, R:site)
@@ -56,37 +55,33 @@ after init {
     deliver_inquire(S, R, T) := false;
     deliver_yield(S, R, T) := false;
     deliver_release(S, R, T) := false;
-
     received_request_at(R, S, T) := false;
     sent_grant_at(R, S, T) := false;
-    
     received_grant(S, R) := false;
     received_failed(S, R) := false;
     sent_yield(K, R) := false;
-    sent_inquire(R, K) := false;
-
     invoke(S) := false;
     critical(S) := false;
-    
     now := zero;
 }
 
+# called asynchronously when s tries to hold the mutex
 action initiate_request(s:site) = {
     require ~invoke(s);
     invoke(s) := true;
     deliver_request(s, R, now) := true;
 }
 
+# called asynchronously when a request message is sent from s to r
 action handle_request(s:site, r:site, t:time) = {
-    require deliver_request(s, r, t);
+    require deliver_request(s, r, t) & (deliver_request(s, r, T) -> t <= T);
     deliver_request(s, r, t) := false;
     call changetime;
     if some t0:time, k:site. sent_grant_at(r, k, t0) {
 	if t0 <= t {
 	    deliver_failed(r, s, now) := true;
-	} else if ~sent_inquire(r, k) { # should change sent_inquire to false somewhere
+	} else {
 	    deliver_inquire(r, k, now) := true;
-	    sent_inquire(r, k) := true;
 	};
 	received_request_at(r, s, t) := true;
     } else {
@@ -95,36 +90,41 @@ action handle_request(s:site, r:site, t:time) = {
     };
 }
 
+# called asynchronously when a grant message is sent from r to s
 action handle_grant(r:site, s:site, t:time) = {
-    require deliver_grant(r, s, t);
+    require deliver_grant(r, s, t) & (deliver_grant(r, s, T) -> t <= T);
     deliver_grant(r, s, t) := false;
     call changetime;
     received_grant(s, r) := true;
-
-    # not sure about that
     received_failed(s, r) := false; # if received a grant, previous failed is irrelevant
+    # sent_inquire(s, r) := false; # should check this
+    # sent_yield(s, r) := false;
 }
 
+
+# called asynchronously when a failed message is sent from r to s
 action handle_failed(r:site, s:site, t:time) = {
-    require deliver_failed(r, s, t);
+    require deliver_failed(r, s, t) & (deliver_failed(r, s, T) -> t <= T);
     deliver_failed(r, s, t) := false;
     call changetime;
     received_failed(s, r) := true;
     # fails accumulate! MAYBE should cancel failed upon grant?
 }
 
+# called asynchronously when an inquire message is sent from r to k
 action handle_inquire(r:site, k:site, t:time) = {
-    require deliver_inquire(r, k, t);
+    require deliver_inquire(r, k, t) & (deliver_inquire(r, k, T) -> t <= T);
     deliver_inquire(r, k, t) := false;
     call changetime;
-    if exists O:site. received_failed(k, O) | sent_yield(k, O) { # if received any fail or gave any yield
+    if exists O:site. received_failed(k, O) { # if received any fail or gave any yield
 	deliver_yield(k, r, now) := true;
 	sent_yield(k, r) := true;
     };
 }
 
+# called asynchronously when a yield message is sent from k to r
 action handle_yield(k:site, r:site, t:time) = {
-    require deliver_yield(k, r, t);
+    require deliver_yield(k, r, t) & (deliver_yield(k, r, T) -> t <= T);
     deliver_yield(k, r, t) := false;
     call changetime;
     if some s0:site, t0:time. received_request_at(r, s0, t0) minimizing t0 {
@@ -138,8 +138,9 @@ action handle_yield(k:site, r:site, t:time) = {
     };
 }
 
+# called asynchronously when a release message is sent from s to r
 action handle_release(s:site, r:site, t:time) = {
-    require deliver_release(s, r, t);
+    require deliver_release(s, r, t) & (deliver_release(s, r, T) -> t <= T);
     deliver_release(s, r, t) := false;
     call changetime;
     sent_grant_at(r, s, T) := false;
@@ -149,7 +150,6 @@ action handle_release(s:site, r:site, t:time) = {
     };
     received_failed(r, s) := false;
     sent_yield(r, s) := false;
-    sent_inquire(r, s) := false;
 }    
 
 action enter_critical_section(s:site) = {
@@ -165,6 +165,10 @@ action exit_critical_section(s:site) = {
     invoke(s) := false;
     deliver_release(s, R, now) := true;
     received_grant(s, R) := false;
+#   received_failed(s, R) := false;
+#   sent_grant_at(s, R, T) := false;
+#   sent_yield(s, R) := false;
+#   sent_inquire(s, R) := false;
 }
 
 export initiate_request
@@ -172,7 +176,7 @@ export handle_request
 export handle_grant
 export handle_failed
 export handle_inquire
-# export handle_yield
+export handle_yield
 export enter_critical_section
 export exit_critical_section
 
@@ -181,41 +185,60 @@ export exit_critical_section
 ##############
 
 
-invariant received_grant(S, R) -> invoke(S) # if a grant is sent to a site, it must have tried to hold the mutex
+invariant critical(S) -> invoke(S) # if a site holds the mutex it tried to do so
+# the following invariant is wrong because after exiting critical section, received_grant(S, R) can still be true
+# invariant received_grant(S, R) -> invoke(S)
+# if a grant is sent to a site, it must have tried to hold the mutex
+
 invariant deliver_grant(R, S, T) -> invoke(S) # if a grant is sent to a site, it must have tried to hold the mutex
 invariant deliver_request(S, R, T) -> invoke(S) # a site can send requests only upon trying to hold the mutex
 invariant received_request_at(R, S, T) -> invoke(S)
-invariant critical(S) -> invoke(S) # if a site holds the mutex it tried to do so
+
+invariant deliver_request(S, R, T) -> T <= now
+invariant deliver_grant(S, R, T) -> T <= now
+invariant deliver_inquire(R, K, T) -> T <= now
+invariant deliver_yield(K, R, T) -> T <= now
+invariant deliver_failed(R, S, T) -> T <= now
+invariant deliver_release(R, S, T) -> T <= now
+invariant received_request_at(R, S, T) -> T <= now
+invariant sent_grant_at(R, S, T) -> T <= now
 
 invariant critical(S1) & critical(S2) -> S1 = S2 # mutual exclusion is kept
 invariant critical(S) -> received_grant(S, R) # holding the mutex requires grants from all sites
+invariant ~(received_request_at(R, S, T) & critical(S)) # a site in the critical section must have positive answers for all requests
 invariant ~(deliver_request(S, R, T) & critical(S)) # a site in the critical section must have positive answers for all requests
 
-# invariant sent_inquire(R, S1) & sent_inquire(R, S2) -> S1 = S2 # cannot inquire from two different sites
 invariant sent_grant_at(R, S1, T1) & sent_grant_at(R, S2, T2) -> S1 = S2 & T1 = T2 # can send a grant to 1 site only
 invariant received_grant(S1, R) & received_grant(S2, R) -> S1 = S2 # can send a grant to 1 site only
 invariant deliver_request(S, R, T1) & deliver_request(S, R, T2) -> T1 = T2 # can send a request 1 time only
 invariant deliver_grant(R, S1, T1) & deliver_grant(R, S2, T2) -> S1 = S2 & T1 = T2 # can send a grant 1 time only, to only 1 site
-invariant deliver_inquire(R, S, T1) & deliver_inquire(R, S, T2) -> T1 = T2 # can send an inquire 1 time only
+# invariant deliver_inquire(R, S, T1) & deliver_inquire(R, S, T2) -> T1 = T2 # can send an inquire 1 time only
 invariant deliver_yield(R, S, T1) & deliver_yield(R, S, T2) -> T1 = T2 # can send a yield 1 time only
 invariant deliver_failed(R, S, T1) & deliver_failed(R, S, T2) -> T1 = T2 # can send a failed 1 time only
+invariant received_request_at(R, S, T1) & received_request_at(R, S, T2) -> T1 = T2
 
 invariant received_grant(S, R) -> sent_grant(R, S) # if S received a grant from R, then R sent a grant
 invariant deliver_grant(R, S, T1) -> sent_grant(R, S) # if a grant was not yet received, it is still recorded in R
-invariant deliver_yield(K, R, T1) -> sent_inquire(R, K) # if a yield was not yet received, inquire is still recorded
 invariant deliver_yield(K, R, T1) -> sent_yield(K, R) # if a yield was not yet received, it is still recorded in K
 invariant deliver_yield(K, R, T1) -> sent_grant(R, K) # if a yield was not yet received, R still grants K
 invariant deliver_inquire(R, K, T1) -> sent_grant(R, K) # if R tries to inquire from K, it still grants K
-invariant deliver_inquire(R, K, T1) -> sent_inquire(R, K) # if R tries to inquire from K, it is still recorded in R
+invariant deliver_inquire(R, K, T1) & sent_grant_at(R, K, T2) -> T2 < T1 # deliver inquire comes after sent_grant_at
 invariant deliver_failed(R, S, T1) -> received_request(R, S) # if a failed message was not yet received, S is still in R's queue
 
-invariant ~(deliver_request(S, R, T1) & received_request_at(R, S, T2)) # cannot send a request while in some site's queue
-invariant ~(deliver_yield(K, R, T1) & deliver_inquire(R, K, T2))
-# invariant ~(deliver_inquire(R, K, T1) & sent_yield(K, R)) # cannot inquire from K if K already sent a yield
+    
+
 invariant ~(received_grant(K, R) & deliver_grant(R, S, T2)) # if K has a grant from R, R cannot send any more grants
-invariant ~(deliver_request(S, R, T1) & deliver_grant(R, S, T2)) # a requesting site cannot be granted
-invariant ~(deliver_grant(R, S, T1) & received_grant(S, R)) # cannot redeliver a grant
 invariant ~(received_grant(S, R) & deliver_request(S, R, T2)) # if S has received a grant from R, it cannot send another request
 invariant ~(received_request_at(R, S, T1) & sent_grant_at(R, S, T2)) # sent grant is not contained in request queue
+invariant ~(deliver_grant(R, S, T1) & received_grant(S, R)) # cannot redeliver a grant
+invariant ~(deliver_request(S, R, T1) & received_request_at(R, S, T2)) # cannot send a request while in some site's queue
 invariant ~(deliver_request(S, R, T1) & received_request_at(R, S, T2)) # cannot deliver request if already received
-# invariant ~(deliver_request(S, R, T1) & sent_grant_at(R, S, T2)) # cannot deliver request to a site that gave you a grant
+invariant ~(deliver_request(S, R, T1) & deliver_grant(R, S, T2)) # a requesting site cannot be granted
+invariant ~(deliver_request(S, R, T1) & sent_grant_at(R, S, T2)) # cannot deliver request to a site that gave you a grant
+# invariant ~(deliver_yield(K, R, T1) & deliver_inquire(R, K, T2)) wrong
+invariant ~(deliver_inquire(R, K, T1) & sent_yield(K, R)) # cannot inquire from K if K already sent a yield
+
+
+
+    
+invariant invoke(S) -> forall R. exists T. deliver_request(S, R, T) | received_request_at(R, S, T) | sent_grant_at(R, S, T) 
