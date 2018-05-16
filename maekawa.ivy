@@ -181,6 +181,7 @@ action handle_release(s:site, r:site, t:time) = {
     if some s0:site, t0:time. received_request_at(r, s0, t0) minimizing t0 {
 	received_request_at(r, s0, t0) := false;
 	deliver_grant(r, s0, now) := true;
+	sent_grant_at(r, s0, now) := true;
     };
     received_failed(r, s) := false;
     sent_yield(r, s) := false;
@@ -210,14 +211,26 @@ export handle_request
 export handle_grant
 export handle_failed
 export handle_inquire
-#export handle_yield
-#export handle_release
-#export enter_critical_section
-#export exit_critical_section
+export handle_yield
+export handle_release
+export enter_critical_section
+export exit_critical_section
 
 ##############
 # invariants #
 ##############
+
+###########
+# timings #
+###########
+invariant deliver_request(S, R, T) -> T <= now
+invariant deliver_grant(S, R, T) -> T <= now
+invariant deliver_inquire(R, K, T) -> T <= now
+invariant deliver_yield(K, R, T) -> T <= now
+invariant deliver_failed(R, S, T) -> T <= now
+invariant deliver_release(R, S, T) -> T <= now
+invariant received_request_at(R, S, T) -> T <= now
+invariant sent_grant_at(R, S, T) -> T <= now
 
 
 invariant critical(S) -> invoke(S) # if a site holds the mutex it tried to do so
@@ -229,15 +242,8 @@ invariant received_request_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 invariant sent_grant_at(R, S, T1) -> invoke(S) | deliver_release_(S, R)
 invariant sent_grant_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 invariant received_grant(S, R) -> invoke(S)
+invariant received_failed(S, R) -> invoke(S)
 
-invariant deliver_request(S, R, T) -> T <= now
-invariant deliver_grant(S, R, T) -> T <= now
-invariant deliver_inquire(R, K, T) -> T <= now
-invariant deliver_yield(K, R, T) -> T <= now
-invariant deliver_failed(R, S, T) -> T <= now
-invariant deliver_release(R, S, T) -> T <= now
-invariant received_request_at(R, S, T) -> T <= now
-invariant sent_grant_at(R, S, T) -> T <= now
 
 invariant critical(S1) & critical(S2) -> S1 = S2 # mutual exclusion is kept
 invariant critical(S) -> received_grant(S, R) # holding the mutex requires grants from all sites
@@ -253,15 +259,23 @@ invariant received_request_at(R, S, T1) & received_request_at(R, S, T2) -> T1 = 
 
 invariant received_grant(S, R) -> sent_grant(R, S) # if S received a grant from R, then R sent a grant
 invariant deliver_grant(R, S, T1) -> sent_grant(R, S) # if a grant was not yet received, it is still recorded in R
-# invariant deliver_yield(K, R, T1) -> sent_yield(K, R) # if a yield was not yet received, it is still recorded in K
 invariant deliver_yield(K, R, T1) -> sent_grant(R, K) # if a yield was not yet received, R still grants K
 invariant deliver_inquire(R, K, T1) -> sent_grant(R, K) # if R tries to inquire from K, it still grants K
 invariant deliver_inquire(R, K, T1) & sent_grant_at(R, K, T2) -> T2 < T1 # deliver inquire comes after sent_grant_at
 invariant deliver_failed(R, S, T1) -> received_request(R, S) # if a failed message was not yet received, S is still in R's queue
 invariant deliver_release(S, R, T1) -> sent_grant(R, S)
 invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1
+invariant ~(deliver_release(S, R, T1) & deliver_grant(R, S, T2))
+invariant ~(deliver_release(S, R, T1) & received_grant(S, R))
+invariant ~(deliver_release(S, R, T1) & received_request_at(R, S, T2))
+invariant deliver_yield(K, R, T1) & deliver_release(K, R, T2) -> T1 < T2 # - not sure about this one - check if true
+invariant ~(received_failed(S, R) & deliver_release(S, R, T2))
+invariant ~(sent_grant_at(R, S, T1) & received_failed(S, R))
+invariant ~(deliver_request(S, R, T1) & received_failed(S, R))
+invariant received_request_at(R, S, T1) & deliver_release(S, R, T2) -> T2 < T1
 
-invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> deliver_release_(S, R)
+
+invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> deliver_release_(S, R) # demonstration
 invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) & deliver_release(S, R, T3) -> T2 < T3 & T3 < T1
 invariant ~(deliver_release(S, R, T1) & received_request_at(R, S, T2))
 invariant ~(received_grant(K, R) & deliver_grant(R, S, T2)) # if K has a grant from R, R cannot send any more grants
