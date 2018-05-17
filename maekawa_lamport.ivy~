@@ -52,12 +52,20 @@ relation received_failed(S:site, R:site)
 relation invoke(S:site)
 relation critical(S:site)
 
-individual now : time
+individual now(S:site) : time
 
-action changetime = {
+action change(s:site) = {
     local n : time {
-	assume now < n;
-	now := n;
+	assume now(s) < n;
+	now(s) := n;
+    }
+}
+
+action changetime(s:site, t:time) = {
+    local n : time {
+	assume now(s) < n;
+	assume t < n;
+	now(s) := n;
     }
 }
 
@@ -75,7 +83,7 @@ after init {
     sent_yield(K, R) := false;
     invoke(S) := false;
     critical(S) := false;
-    now := zero;
+    now(S) := zero;
 }
 
 action minimizes_messages(r:site, t:time) returns (z:bool) = {
@@ -104,9 +112,9 @@ action minimizes_messages(r:site, t:time) returns (z:bool) = {
 # called asynchronously when s tries to hold the mutex
 action initiate_request(s:site) = {
     require ~invoke(s);
-    call changetime;
+    call change(s);
     invoke(s) := true;
-    deliver_request(s, R, now) := true;
+    deliver_request(s, R, now(s)) := true;
 }
 
 
@@ -114,16 +122,16 @@ action initiate_request(s:site) = {
 action handle_request(s:site, r:site, t:time) = {
     require deliver_request(s, r, t) & minimizes_messages(r, t);
     deliver_request(s, r, t) := false;
-    call changetime;
+    call changetime(r, t);
     if some t0:time, k:site. sent_grant_at(r, k, t0) {
 	if t0 <= t {
-	    deliver_failed(r, s, now) := true;
+	    deliver_failed(r, s, now(r)) := true;
 	} else {
-	    deliver_inquire(r, k, now) := true;
+	    deliver_inquire(r, k, now(r)) := true;
 	};
 	received_request_at(r, s, t) := true;
     } else {
-	deliver_grant(r, s, now) := true;
+	deliver_grant(r, s, now(r)) := true;
 	sent_grant_at(r, s, t) := true;
     };
 }
@@ -132,7 +140,7 @@ action handle_request(s:site, r:site, t:time) = {
 action handle_grant(r:site, s:site, t:time) = {
     require deliver_grant(r, s, t) & minimizes_messages(s, t);
     deliver_grant(r, s, t) := false;
-    call changetime;
+    call changetime(s, t);
     received_grant(s, r) := true;
     received_failed(s, r) := false; # if received a grant, previous failed is irrelevant
     sent_yield(s, r) := false;
@@ -143,7 +151,7 @@ action handle_grant(r:site, s:site, t:time) = {
 action handle_failed(r:site, s:site, t:time) = {
     require deliver_failed(r, s, t) & minimizes_messages(s, t);
     deliver_failed(r, s, t) := false;
-    call changetime;
+    call changetime(s, t);
     received_failed(s, r) := true;
     # fails accumulate! MAYBE should cancel failed upon grant?
 }
@@ -152,9 +160,9 @@ action handle_failed(r:site, s:site, t:time) = {
 action handle_inquire(r:site, k:site, t:time) = {
     require deliver_inquire(r, k, t) & minimizes_messages(k, t);
     deliver_inquire(r, k, t) := false;
-    call changetime;
+    call changetime(k, t);
     if (exists O:site. received_failed(k, O) | sent_yield(k, O)) & received_grant(k, r) { # don't send yield if not received grant
-	deliver_yield(k, r, now) := true;
+	deliver_yield(k, r, now(k)) := true;
 	sent_yield(k, r) := true;
 	received_grant(k, r) := false;
     };
@@ -164,11 +172,11 @@ action handle_inquire(r:site, k:site, t:time) = {
 action handle_yield(k:site, r:site, t:time) = {
     require deliver_yield(k, r, t) & minimizes_messages(r, t);
     deliver_yield(k, r, t) := false;
-    call changetime;
+    call changetime(r, t);
     if some s0:site, t0:time. received_request_at(r, s0, t0) minimizing t0 {
 	received_request_at(r, s0, t0) := false;
 	sent_grant_at(r, s0, t0) := true;
-	deliver_grant(r, s0, now) := true;
+	deliver_grant(r, s0, now(r)) := true;
     };
     if some t1:time. sent_grant_at(r, k, t1) {
 	received_request_at(r, k, t1) := true;
@@ -180,27 +188,27 @@ action handle_yield(k:site, r:site, t:time) = {
 action handle_release(s:site, r:site, t:time) = {
     require deliver_release(s, r, t) & minimizes_messages(r, t);
     deliver_release(s, r, t) := false;
-    call changetime;
+    call changetime(r, t);
     sent_grant_at(r, s, T) := false;
     if some s0:site, t0:time. received_request_at(r, s0, t0) minimizing t0 {
 	received_request_at(r, s0, t0) := false;
-	deliver_grant(r, s0, now) := true;
-	sent_grant_at(r, s0, t) := true;
+	deliver_grant(r, s0, now(r)) := true;
+	sent_grant_at(r, s0, now(r)) := true;
     };
 }    
 
 action enter_critical_section(s:site) = {
     require invoke(s) & forall R. received_grant(s, R);
-    call changetime;
+    call change(s);
     critical(s) := true;
 }
 
 action exit_critical_section(s:site) = {
     require critical(s);
-    call changetime;
+    call change(s);
     critical(s) := false;
     invoke(s) := false;
-    deliver_release(s, R, now) := true;
+    deliver_release(s, R, now(s)) := true;
     received_grant(s, R) := false;
 }
 
@@ -222,14 +230,14 @@ export exit_critical_section
 
 
 # TIMING: messages cannot be sent after current time
-invariant deliver_request(S, R, T) -> T <= now
-invariant deliver_grant(S, R, T) -> T <= now
-invariant deliver_inquire(R, K, T) -> T <= now
-invariant deliver_yield(K, R, T) -> T <= now
-invariant deliver_failed(R, S, T) -> T <= now
-invariant deliver_release(R, S, T) -> T <= now
-invariant received_request_at(R, S, T) -> T <= now
-invariant sent_grant_at(R, S, T) -> T <= now
+invariant deliver_request(S, R, T) -> T <= now(S)
+invariant deliver_grant(S, R, T) -> T <= now(S)
+invariant deliver_inquire(R, K, T) -> T <= now(R)
+invariant deliver_yield(K, R, T) -> T <= now(K)
+invariant deliver_failed(R, S, T) -> T <= now(R)
+invariant deliver_release(R, S, T) -> T <= now(R)
+invariant received_request_at(R, S, T) -> T <= now(S) # this is special
+invariant sent_grant_at(R, S, T) -> T <= now(R)
 
 # TIMING: a site cannot send more than one message at a moment
 invariant deliver_request(S, R, T1) & deliver_grant(S, R, T2) -> T1 ~= T2
@@ -270,10 +278,11 @@ invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> deliver_release
 invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) & deliver_release(S, R, T3) -> T2 < T3 & T3 < T1
 invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1 # cannot deliver request to a site that gave you a grant
 invariant deliver_request(S, R, T1) & deliver_release(S, R, T2) -> T2 < T1
-invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1
+invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1 - time issues
 invariant deliver_failed(R, S, T1) & deliver_grant(R, S, T2) -> T1 < T2
 invariant deliver_failed(R, S, T1) -> received_request(R, S) | sent_grant(R, S)
 invariant sent_grant_at(R, S, T1) -> invoke(S) | deliver_release_(S, R)
+invariant sent_grant_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 invariant sent_grant_at(R, K, T1) & deliver_yield(K, R, T2) -> T1 < T2
 invariant sent_grant_at(R, S, T1) & received_failed(S, R) -> deliver_grant_(R, S)
 invariant sent_grant_at(R, S, T1) & deliver_failed(R, S, T2) -> deliver_grant_(R, S)
