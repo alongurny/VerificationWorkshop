@@ -274,7 +274,6 @@ invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1
 invariant deliver_failed(R, S, T1) & deliver_grant(R, S, T2) -> T1 < T2
 invariant deliver_failed(R, S, T1) -> received_request(R, S) | sent_grant(R, S)
 invariant sent_grant_at(R, S, T1) -> invoke(S) | deliver_release_(S, R)
-invariant sent_grant_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
 invariant sent_grant_at(R, K, T1) & deliver_yield(K, R, T2) -> T1 < T2
 invariant sent_grant_at(R, S, T1) & received_failed(S, R) -> deliver_grant_(R, S)
 invariant sent_grant_at(R, S, T1) & deliver_failed(R, S, T2) -> deliver_grant_(R, S)
