@@ -321,6 +321,8 @@ invariant ~(received_grant(S, R) & deliver_request(S, R, T2)) # if S has receive
 invariant received_request_at(R, S, T1) & deliver_release(S, R, T2) -> T2 < T1
 invariant deliver_yield(K, R, T1) -> sent_grant(R, K)
 
+invariant ~(deliver_yield(K, R, T1) & deliver_release(K, R, T2))
+
 ###########################
 # The invariant graveyard #
 ###########################
