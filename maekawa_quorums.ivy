@@ -232,10 +232,8 @@ export exit_critical_section
 #                #
 ##################
 
-# LAMPORT
-# invariant received_grant(S, R) & sent_grant_at(R, S, T) -> T <= now(S)
-# invariant deliver_grant(R, S, T1) & sent_grant_at(R, S, T) -> T <= now(S)
-
+# MUTUAL EXCLUSION: any two intersecting quorums have mutual exclusion
+invariant quorum(S1, S) & quorum(S2, S) & critical(S1) & critical(S2) -> S1 = S2
 
 # TIMING: messages cannot be sent after current time
 invariant deliver_request(S, R, T) -> T <= now(S)
