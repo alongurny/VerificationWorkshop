@@ -213,13 +213,23 @@ export handle_release
 export enter_critical_section
 export exit_critical_section
 
-##############
-# invariants #
-##############
+##################
+#                #
+#   INVARIANTS   #
+#                #
+##################
 
-###########
-# timing #
-###########
+# CRITICAL SECTION
+invariant critical(S1) & critical(S2) -> S1 = S2 # MUTUAL EXCLUSION: no more than one site holds the mutex
+invariant critical(S) -> received_grant(S, R) # BASIC INVARIANT (QUORUM): holding the mutex requires grants from all sites
+invariant ~(critical(S) & deliver_yield(S, R, T))
+invariant ~(critical(S) & deliver_failed(R, S, T))
+invariant ~(critical(S) & received_failed(S, R))
+invariant ~(critical(S) & sent_yield(S, R))
+invariant ~(critical(S) & received_request_at(R, S, T)) # a site in the critical section must have positive answers for all requests
+invariant ~(critical(S) & deliver_request(S, R, T)) # a site in the critical section must have positive answers for all requests
+
+# TIMING: messages cannot be sent after current time
 invariant deliver_request(S, R, T) -> T <= now
 invariant deliver_grant(S, R, T) -> T <= now
 invariant deliver_inquire(R, K, T) -> T <= now
@@ -229,6 +239,7 @@ invariant deliver_release(R, S, T) -> T <= now
 invariant received_request_at(R, S, T) -> T <= now
 invariant sent_grant_at(R, S, T) -> T <= now
 
+# TIMING: a site cannot send more than one message at a moment
 invariant deliver_request(S, R, T1) & deliver_grant(S, R, T2) -> T1 ~= T2
 invariant deliver_request(S, R, T1) & deliver_inquire(S, R, T2) -> T1 ~= T2
 invariant deliver_request(S, R, T1) & deliver_yield(S, R, T2) -> T1 ~= T2
@@ -266,6 +277,7 @@ invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1
 invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1 # cannot deliver request to a site that gave you a grant
 invariant sent_grant_at(R, K, T1) & deliver_yield(K, R, T2) -> T1 < T2
 invariant deliver_failed(R, S, T1) & deliver_grant(R, S, T2) -> T1 < T2
+invariant received_request_at(R, S, T1) & deliver_release(S, R, T2) -> T2 < T1
 
 invariant sent_grant_at(R, S1, T1) & sent_grant_at(R, S2, T2) -> S1 = S2 & T1 = T2 # can send a grant to 1 site only
 invariant received_grant(S1, R) & received_grant(S2, R) -> S1 = S2 # can send a grant to 1 site only
@@ -279,49 +291,35 @@ invariant deliver_yield(K, R, T1) & deliver_yield(K, R, T2) -> T1 = T2
 invariant sent_grant_at(R, S, T1) & received_failed(S, R) -> deliver_grant_(R, S)
 invariant sent_grant_at(R, S, T1) & deliver_failed(R, S, T2) -> deliver_grant_(R, S)
 
-invariant ~(deliver_yield(S, R, T) & received_grant(S, R))
-invariant ~(deliver_yield(S, R, T1) & deliver_grant(R, S, T2))
-invariant ~(critical(S) & deliver_yield(S, R, T))
-invariant ~(deliver_failed(R, S, T) & critical(S))
-invariant ~(deliver_failed(R, S, T1) & received_grant(S, R))
-invariant ~(received_failed(S, R) & critical(S))
-invariant ~(sent_yield(S, R) & critical(S))
-invariant critical(S1) & critical(S2) -> S1 = S2 # mutual exclusion is kept
-invariant critical(S) -> received_grant(S, R) # holding the mutex requires grants from all sites
-invariant ~(received_request_at(R, S, T) & critical(S)) # a site in the critical section must have positive answers for all requests
-invariant ~(deliver_request(S, R, T) & critical(S)) # a site in the critical section must have positive answers for all requests
-invariant ~(sent_yield(S, R) & critical(S))
-invariant ~(received_failed(S, R) & critical(S))
-invariant ~(sent_yield(S, R) & received_grant(S, R))
-invariant ~(received_failed(S, R) & received_grant(S, R))
 
 invariant received_grant(S, R) -> sent_grant(R, S) # if S received a grant from R, then R sent a grant
 invariant deliver_grant(R, S, T1) -> sent_grant(R, S) # if a grant was not yet received, it is still recorded in R
 invariant deliver_failed(R, S, T1) -> received_request(R, S) | sent_grant(R, S) # if a failed message was not yet received, S is still in R's queue
 invariant deliver_release(S, R, T1) -> sent_grant(R, S)
+invariant deliver_yield(K, R, T1) -> sent_grant(R, K)
+
+
 invariant ~(deliver_release(S, R, T1) & deliver_grant(R, S, T2))
 invariant ~(deliver_release(S, R, T1) & received_grant(S, R))
 invariant ~(deliver_release(S, R, T1) & received_request_at(R, S, T2))
 invariant ~(deliver_release(S, R, T2) & received_failed(S, R))
-invariant ~(deliver_release(S, R, T1) & received_request_at(R, S, T2))
-invariant ~(received_grant(K, R) & deliver_grant(R, S, T2)) # if K has a grant from R, R cannot send any more grants
-invariant ~(received_request_at(R, S, T1) & sent_grant_at(R, S, T2)) # sent grant is not contained in request queue
+invariant ~(deliver_grant(R, S, T1) & received_grant(K, R)) # if K has a grant from R, R cannot send any more grants
 invariant ~(deliver_grant(R, S, T1) & received_grant(S, R)) # cannot redeliver a grant
 invariant ~(deliver_request(S, R, T1) & received_request_at(R, S, T2)) # cannot send a request while in some site's queue
-invariant ~(deliver_request(S, R, T1) & received_request_at(R, S, T2)) # cannot deliver request if already received
 invariant ~(deliver_request(S, R, T1) & deliver_grant(R, S, T2)) # a requesting site cannot be granted
 invariant ~(deliver_request(S, R, T1) & received_failed(S, R))
-invariant ~(received_grant(S, R) & deliver_request(S, R, T2)) # if S has received a grant from R, it cannot send another request
-
+invariant ~(deliver_request(S, R, T1) & received_grant(S, R)) # if S has received a grant from R, it cannot send another request
+invariant ~(received_request_at(R, S, T1) & sent_grant_at(R, S, T2)) # sent grant is not contained in request queue
+invariant ~(deliver_yield(S, R, T) & received_grant(S, R))
+invariant ~(deliver_yield(S, R, T1) & deliver_grant(R, S, T2))
+invariant ~(deliver_failed(R, S, T1) & received_grant(S, R))
+invariant ~(sent_yield(S, R) & received_grant(S, R))
+invariant ~(received_failed(S, R) & received_grant(S, R))
+invariant ~(deliver_yield(K, R, T1) & deliver_release(K, R, T2))
 
 ##############################
 # The problematic invariants #
 ##############################
-# invariant deliver_grant(R, S, T1) & sent_grant_at(R, S, T2) -> T2 < T1
-invariant received_request_at(R, S, T1) & deliver_release(S, R, T2) -> T2 < T1
-invariant deliver_yield(K, R, T1) -> sent_grant(R, K)
-
-invariant ~(deliver_yield(K, R, T1) & deliver_release(K, R, T2))
 
 ###########################
 # The invariant graveyard #
@@ -333,3 +331,4 @@ invariant ~(deliver_yield(K, R, T1) & deliver_release(K, R, T2))
 # invariant sent_yield(K, R) & sent_grant_at(R, K, T2) -> deliver_yield_(K, R) - wrong - maybe gentlize
 # invariant deliver_yield(K, R, T1) & sent_grant(R, K) & deliver_release(K, R, T2) -> T1
 # invariant ~(deliver_failed(R, S, T1) & sent_grant_at(R, S, T2)) - totally wrong
+# invariant deliver_grant(R, S, T1) & sent_grant_at(R, S, T2) -> T2 < T1
