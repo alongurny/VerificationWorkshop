@@ -193,7 +193,7 @@ action handle_release(s:site, r:site, t:time) = {
     if some s0:site, t0:time. received_request_at(r, s0, t0) minimizing t0 {
 	received_request_at(r, s0, t0) := false;
 	deliver_grant(r, s0, now(r)) := true;
-	sent_grant_at(r, s0, t) := true;
+	sent_grant_at(r, s0, t0) := true;
     };
 }    
 
@@ -229,8 +229,8 @@ export exit_critical_section
 ##################
 
 # LAMPORT
-invariant received_grant(S, R) & sent_grant_at(R, S, T) -> T <= now(S)
-invariant deliver_grant(R, S, T1) & sent_grant_at(R, S, T) -> T <= now(S)
+# invariant received_grant(S, R) & sent_grant_at(R, S, T) -> T <= now(S)
+# invariant deliver_grant(R, S, T1) & sent_grant_at(R, S, T) -> T <= now(S)
 
 
 # TIMING: messages cannot be sent after current time
@@ -240,8 +240,8 @@ invariant deliver_inquire(R, K, T) -> T <= now(R)
 invariant deliver_yield(K, R, T) -> T <= now(K)
 invariant deliver_failed(R, S, T) -> T <= now(R)
 invariant deliver_release(S, R, T) -> T <= now(S)
-invariant received_request_at(R, S, T) -> T <= now(S) # this is special
-invariant sent_grant_at(R, S, T) -> T <= now(R)
+invariant received_request_at(R, S, T) -> T <= now(S)
+invariant sent_grant_at(R, S, T) -> T <= now(S)
 
 # TIMING: a site cannot send more than one message at a moment
 invariant deliver_request(S, R, T1) & deliver_grant(S, R, T2) -> T1 ~= T2
