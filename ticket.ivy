@@ -1,0 +1,17 @@
+#lang ivy1.7
+
+after init {
+
+}
+
+action donothing = {
+
+}
+
+export donothing
+
+invariant false
+
+# conjecture eventually false
+
+temporal property true

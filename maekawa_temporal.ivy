@@ -7,14 +7,23 @@ type time
 # upon changing deliver from relations to derived, and adding deliver(message, site, site, time),
 # all worked despite not working before. This should not be a semantic change.
 
-relation (X:time < Y:time)
-axiom [antireflexivity] ~(X:time < X)
-axiom [antisymmetry] ~(X:time < Y & Y < X)
-axiom [transitivity] X:time < Y & Y < Z -> X < Z
-axiom [totallity] X:time < Y | Y < X | X = Y
+module zeroed_total_order(t) = {
+    relation (X:t < Y:t)
+    relation (X:t <= Y:t)
+    individual zero : t
+    axiom [antireflexivity] ~(X:t < X)
+    axiom [antisymmetry] ~(X:t < Y & Y < X)
+    axiom [transitivity] X:t < Y & Y < Z -> X < Z
+    axiom [totallity] X:t < Y | Y < X | X = Y
+    axiom [related] X:t <= Y <-> X < Y | X = Y
+    axiom [nonnegativity] zero <= X:t
+}
 
-relation quorum(S:site, R:site)
-axiom [quorum_reflexivity] quorum(S, S)
+instantiate zeroed_total_order(time)
+
+relation quorum(S:site, P:site)
+
+axiom quorum(S, S)
 
 # network messages
 relation deliver_request(S:site, R:site, T:time)
@@ -24,18 +33,16 @@ relation deliver_inquire(S:site, R:site, T:time)
 relation deliver_yield(S:site, R:site, T:time)
 relation deliver_release(S:site, R:site, T:time)
 
-derived deliver_request_(S:site, R:site) = exists T. deliver_request(S, R, T)
-derived deliver_grant_(R:site, S:site) = exists T. deliver_grant(R, S, T)
-derived deliver_yield_(K:site, R:site) = exists T. deliver_yield(K, R, T)
-derived deliver_release_(S:site, R:site) = exists T. deliver_release(S, R, T)
-derived deliver_failed_(R:site, S:site) = exists T. deliver_failed(R, S, T)
-derived deliver_inquire_(R:site, S:site) = exists T. deliver_inquire(R, S, T)
-
 relation received_request_at(R:site, S:site, T:time)
 relation sent_grant_at(R:site, S:site, T:time)
 
 derived received_request(R:site, S:site) = exists T. received_request_at(R, S, T)
 derived sent_grant(R:site, S:site) = exists T. sent_grant_at(R, S, T)
+
+derived deliver_request_(S:site, R:site) = exists T. deliver_request(S, R, T)
+derived deliver_grant_(R:site, S:site) = exists T. deliver_grant(R, S, T)
+derived deliver_yield_(K:site, R:site) = exists T. deliver_yield(K, R, T)
+derived deliver_release_(S:site, R:site) = exists T. deliver_release(S, R, T)
 
 relation sent_yield(K:site, R:site)
 
@@ -76,6 +83,7 @@ after init {
     sent_yield(K, R) := false;
     invoke(S) := false;
     critical(S) := false;
+    now(S) := zero;
 }
 
 action minimizes_messages(r:site, t:time) returns (z:bool) = {
@@ -221,11 +229,9 @@ export exit_critical_section
 ##################
 
 # LIVENESS: eventually someone will enter the critical section
-    
+
 # MUTUAL EXCLUSION: any two intersecting quorums have mutual exclusion
-invariant [mutual_exclusion] quorum(S1, S) & quorum(S2, S) & critical(S1) & critical(S2) -> S1 = S2
-invariant [quorum_mutual_exclusion] critical(S1) & critical(S2) & quorum(S1, S2) -> S1 = S2
-invariant [grants_for_mutex] critical(S) & quorum(S, R) -> received_grant(S, R)
+invariant [MUTUAL_EXCLUSION] quorum(S1, S) & quorum(S2, S) & critical(S1) & critical(S2) -> S1 = S2
 
 # TIMING: messages cannot be sent after current time
 invariant deliver_request(S, R, T) -> T <= now(S)
@@ -237,7 +243,7 @@ invariant deliver_release(S, R, T) -> T <= now(S)
 invariant received_request_at(R, S, T) -> T <= now(S)
 invariant sent_grant_at(R, S, T) -> T <= now(S)
 
-# TIMING: a site cannot send more than one message type at a moment
+# TIMING: a site cannot send more than one message at a moment
 invariant deliver_request(S, R, T1) & deliver_grant(S, R, T2) -> T1 ~= T2
 invariant deliver_request(S, R, T1) & deliver_inquire(S, R, T2) -> T1 ~= T2
 invariant deliver_request(S, R, T1) & deliver_yield(S, R, T2) -> T1 ~= T2
@@ -268,12 +274,14 @@ invariant received_request_at(R, S, T) -> quorum(S, R)
 invariant sent_grant_at(R, S, T) -> quorum(S, R)
 
 # CRITICAL SECTION
-invariant ~(critical(S) & deliver_yield_(S, R))
-invariant ~(critical(S) & deliver_failed_(R, S))
+invariant critical(S1) & critical(S2) & quorum(S1, S2) -> S1 = S2 # MUTUAL EXCLUSION: no more than one site holds the mutex
+invariant critical(S) & quorum(S, R) -> received_grant(S, R) # BASIC INVARIANT (QUORUM): holding the mutex requires grants from all sites
+invariant ~(critical(S) & deliver_yield(S, R, T))
+invariant ~(critical(S) & deliver_failed(R, S, T))
 invariant ~(critical(S) & received_failed(S, R))
 invariant ~(critical(S) & sent_yield(S, R))
-invariant ~(critical(S) & received_request(R, S)) # a site in the critical section must have positive answers for all requests
-invariant ~(critical(S) & deliver_request_(S, R)) # a site in the critical section must have positive answers for all requests
+invariant ~(critical(S) & received_request_at(R, S, T)) # a site in the critical section must have positive answers for all requests
+invariant ~(critical(S) & deliver_request(S, R, T)) # a site in the critical section must have positive answers for all requests
 
 # INVOKE
 invariant invoke(S) & quorum(S, R) -> deliver_request_(S, R) | received_request(R, S) | (sent_grant(R, S) & ~deliver_release_(S, R))
@@ -283,26 +291,27 @@ invariant deliver_request(S, R, T) -> invoke(S) # a site can send requests only 
 invariant received_grant(S, R) -> invoke(S)
 invariant received_failed(S, R) -> invoke(S)
 
-invariant deliver_release(S, R, T1) & deliver_request(S, R, T2) -> T1 < T2
+invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> deliver_release_(S, R) # demonstration
+invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) & deliver_release(S, R, T3) -> T2 < T3 & T3 < T1
+invariant deliver_request(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1 # cannot deliver request to a site that gave you a grant
+invariant deliver_request(S, R, T1) & deliver_release(S, R, T2) -> T2 < T1
+invariant deliver_release(S, R, T1) & sent_grant_at(R, S, T2) -> T2 < T1
 invariant deliver_failed(R, S, T1) & deliver_grant(R, S, T2) -> T1 < T2
-invariant sent_grant_at(R, S, T1) & deliver_request(S, R, T2) -> T1 < T2 # cannot deliver request to a site that gave you a grant
+invariant deliver_failed(R, S, T1) -> received_request(R, S) | sent_grant(R, S)
+invariant sent_grant_at(R, S, T1) -> invoke(S) | deliver_release_(S, R)
 invariant sent_grant_at(R, S, T1) & deliver_release(S, R, T2) -> T1 < T2
-invariant sent_grant_at(R, S, T1) & deliver_yield(S, R, T2) -> T1 < T2
-
-invariant sent_grant(R, S) & received_failed(S, R) -> deliver_grant_(R, S)
-invariant sent_grant(R, S) & deliver_failed_(R, S) -> deliver_grant_(R, S)
-invariant sent_grant(R, S) -> invoke(S) | deliver_release_(S, R)
+invariant sent_grant_at(R, K, T1) & deliver_yield(K, R, T2) -> T1 < T2
+invariant sent_grant_at(R, S, T1) & received_failed(S, R) -> deliver_grant_(R, S)
+invariant sent_grant_at(R, S, T1) & deliver_failed(R, S, T2) -> deliver_grant_(R, S)
 invariant received_request_at(R, S, T1) -> invoke(S) | deliver_release_(S, R)
-invariant deliver_request_(S, R) & sent_grant(R, S) -> deliver_release_(S, R) # demonstration
-invariant deliver_failed_(R, S) -> received_request(R, S) | sent_grant(R, S)
-invariant deliver_grant_(R, S) -> sent_grant(R, S) # if a grant was not yet received, it is still recorded in R
-invariant deliver_release_(S, R) -> sent_grant(R, S)
-invariant deliver_yield_(S, R) -> sent_grant(R, S)
+invariant deliver_grant(R, S, T1) -> sent_grant(R, S) # if a grant was not yet received, it is still recorded in R
+invariant deliver_release(S, R, T1) -> sent_grant(R, S)
+invariant deliver_yield(K, R, T1) -> sent_grant(R, K)
 invariant received_grant(S, R) -> sent_grant(R, S) # if S received a grant from R, then R sent a grant
 
 
-invariant deliver_grant_(R, S1) & deliver_grant_(R, S2) -> S1 = S2
-invariant sent_grant(R, S1) & sent_grant(R, S2) -> S1 = S2
+invariant deliver_grant(R, S1, T1) & deliver_grant(R, S2, T2) -> S1 = S2
+invariant sent_grant_at(R, S1, T1) & sent_grant_at(R, S2, T2) -> S1 = S2
 invariant received_grant(S1, R) & received_grant(S2, R) -> S1 = S2
 
 invariant deliver_request(S, R, T1) & deliver_request(S, R, T2) -> T1 = T2 # can send a request 1 time only
@@ -342,7 +351,10 @@ invariant ~(received_failed(S, R) & received_grant(S, R))
 # The invariant graveyard #
 ###########################
 
-# Apparently every one of those
-invariant deliver_yield(K, R, T1) -> sent_yield(K, R)
-invariant sent_yield(K, R) & sent_grant(R, K) -> deliver_yield_(K, R) | deliver_grant_(R, K)
+# invariant ~(deliver_yield(K, R, T1) & deliver_release(K, R, T2)) # *** illusive - truly depedent on quorums
+# invariant deliver_yield(K, R, T1) -> sent_yield(K, R) | sent_grant(R, K)
+# invariant sent_yield(K, R) & sent_grant(R, K) -> exists T. deliver_yield(K, R, T) | deliver_grant(R, K, T)
+# invariant sent_yield(K, R) & sent_grant_at(R, K, T2) -> deliver_yield_(K, R) - wrong - maybe gentlize
+# invariant deliver_yield(K, R, T1) & sent_grant(R, K) & deliver_release(K, R, T2) -> T1
+# invariant ~(deliver_failed(R, S, T1) & sent_grant_at(R, S, T2)) - totally wrong
 # invariant deliver_grant(R, S, T1) & sent_grant_at(R, S, T2) -> T2 < T1
