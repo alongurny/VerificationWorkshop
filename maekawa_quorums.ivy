@@ -41,6 +41,7 @@ relation sent_yield(K:site, R:site)
 
 relation received_grant(S:site, R:site)
 relation received_failed(S:site, R:site)
+relation received_inquire(S:site, R:site)
 
 relation invoke(S:site)
 relation critical(S:site)
@@ -315,22 +316,22 @@ invariant received_request_at(R, S, T1) & received_request_at(R, S, T2) -> T1 = 
 
 
 
-invariant ~(deliver_release(S, R, T1) & deliver_grant(R, S, T2))
-invariant ~(deliver_release(S, R, T1) & received_grant(S, R))
-invariant ~(deliver_release(S, R, T1) & received_request_at(R, S, T2))
-invariant ~(deliver_release(S, R, T2) & received_failed(S, R))
-invariant ~(deliver_grant(R, S, T1) & received_grant(K, R)) # if K has a grant from R, R cannot send any more grants
-invariant ~(deliver_grant(R, S, T1) & received_grant(S, R)) # cannot redeliver a grant
-invariant ~(deliver_request(S, R, T1) & received_request_at(R, S, T2)) # cannot send a request while in some site's queue
-invariant ~(deliver_request(S, R, T1) & deliver_grant(R, S, T2)) # a requesting site cannot be granted
-invariant ~(deliver_request(S, R, T1) & received_failed(S, R))
-invariant ~(deliver_request(S, R, T1) & received_grant(S, R)) # if S has received a grant from R, it cannot send another request
-invariant ~(deliver_yield(S, R, T) & received_grant(S, R))
-invariant ~(deliver_yield(S, R, T1) & deliver_grant(R, S, T2))
-invariant ~(deliver_yield(K, R, T1) & deliver_release(K, R, T2))
-invariant ~(deliver_failed(R, S, T1) & received_grant(S, R))
-invariant ~(deliver_failed(R, S, T1) & deliver_release(S, R, T2))
-invariant ~(received_request_at(R, S, T1) & sent_grant_at(R, S, T2)) # sent grant is not contained in request queue
+invariant ~(deliver_release_(S, R) & deliver_grant_(R, S))
+invariant ~(deliver_release_(S, R) & received_grant(S, R))
+invariant ~(deliver_release_(S, R) & received_request(R, S))
+invariant ~(deliver_release_(S, R) & received_failed(S, R))
+invariant ~(deliver_grant_(R, S) & received_grant(K, R)) # if K has a grant from R, R cannot send any more grants
+invariant ~(deliver_grant_(R, S) & received_grant(S, R)) # cannot redeliver a grant
+invariant ~(deliver_request_(S, R) & received_request(R, S)) # cannot send a request while in some site's queue
+invariant ~(deliver_request_(S, R) & deliver_grant_(R, S)) # a requesting site cannot be granted
+invariant ~(deliver_request_(S, R) & received_failed(S, R))
+invariant ~(deliver_request_(S, R) & received_grant(S, R)) # if S has received a grant from R, it cannot send another request
+invariant ~(deliver_yield_(S, R) & received_grant(S, R))
+invariant ~(deliver_yield_(S, R) & deliver_grant_(R, S))
+invariant ~(deliver_yield_(S, R) & deliver_release_(S, R))
+invariant ~(deliver_failed_(R, S) & received_grant(S, R))
+invariant ~(deliver_failed_(R, S) & deliver_release_(S, R))
+invariant ~(received_request(R, S) & sent_grant(R, S)) # sent grant is not contained in request queue
 invariant ~(sent_yield(S, R) & received_grant(S, R))
 invariant ~(received_failed(S, R) & received_grant(S, R))
 
